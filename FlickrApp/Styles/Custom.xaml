@@ -2,4 +2,6 @@
 
     <!--  custom styles here  -->
 
+    <SolidColorBrush x:Key="PinkBrush">#FF0082</SolidColorBrush>
+
 </ResourceDictionary>

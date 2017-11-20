@@ -1,22 +1,22 @@
-﻿using System.Collections.Generic;
+﻿using FlickrApp.Common;
+using FlickrApp.Helpers;
+using FlickrApp.Models.Photo;
+using FlickrApp.Services;
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Template10.Mvvm;
-using Template10.Services.NavigationService;
-using Windows.UI.Xaml.Navigation;
-using FlickrApp.Services;
-using Windows.UI.Xaml.Controls;
 using Windows.ApplicationModel.Resources;
-using FlickrApp.Models;
-using FlickrApp.Models.Photo;
-using FlickrApp.Helpers;
-using System.Collections.ObjectModel;
-using FlickrApp.Common;
+using Windows.UI.Xaml;
+using Windows.UI.Xaml.Controls;
+using Windows.UI.Xaml.Navigation;
 
 namespace FlickrApp.ViewModels
 {
-    public class MainPageViewModel : ViewModelBase
+    public class SearchPageViewModel : ViewModelBase
     {
         private readonly IPhotosDataServices _photosDataServices;
 
@@ -29,11 +29,11 @@ namespace FlickrApp.ViewModels
         /// Constructor
         /// </summary>
         /// <param name="photosDataServices"></param>
-        public MainPageViewModel(IPhotosDataServices photosDataServices)
+        public SearchPageViewModel(IPhotosDataServices photosDataServices)
         {
             _photosDataServices = photosDataServices;
             PhotosList = new ObservableCollection<Photo>();
-            AppSettings = new AppSettingsHelper();            
+            AppSettings = new AppSettingsHelper();
         }
 
 
@@ -45,12 +45,19 @@ namespace FlickrApp.ViewModels
             get { return _progressVisibility; }
             set { Set(ref _progressVisibility, value); }
         }
-
+        
         private ObservableCollection<Photo> _PhotosList;
         public ObservableCollection<Photo> PhotosList
         {
             get { return _PhotosList; }
             private set { Set(ref _PhotosList, value); }
+        }
+
+        string _searchTerm;
+        public string SearchTerm
+        {
+            get { return _searchTerm; }
+            set { Set(ref _searchTerm, value); }
         }
 
         #endregion
@@ -60,35 +67,19 @@ namespace FlickrApp.ViewModels
 
         public override Task OnNavigatedToAsync(object parameter, NavigationMode mode, IDictionary<string, object> state)
         {
-            object searchItem = AppSettings.RetrieveSetting(Constants.LastSearchKey);
-            if (searchItem != null)
+            if (parameter != null)
             {
-                var searchTerm = searchItem.ToString();
-                NavigateToSearchPage(searchTerm);                
+                SearchTerm = parameter.ToString();
+                LoadSearchResultList();
             }
-            else
-                LoadPhotos();
-
             return base.OnNavigatedToAsync(parameter, mode, state);
         }
 
-        private async void NavigateToSearchPage(string searchTerm)
+        public void SearchQuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
         {
-            if (searchTerm != "")
-                await NavigationService.NavigateAsync(typeof(Views.SearchPage),
-                       searchTerm);
-            else
-                ShowError(ResourceLoader.GetForCurrentView().GetString("EnterSearchKeywordError"));
-        }
-
-        public async void SearchQuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
-        {
-            var searchTerm = args.QueryText;
-            if (searchTerm != "")
-                await NavigationService.NavigateAsync(typeof(Views.SearchPage),
-                   searchTerm);
-            else
-                ShowError(ResourceLoader.GetForCurrentView().GetString("EnterSearchKeywordError"));
+            SearchTerm = sender.Text;
+            PhotosList.Clear();
+            LoadSearchResultList();
         }
 
         public async void SearchTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
@@ -102,27 +93,46 @@ namespace FlickrApp.ViewModels
             }
         }
 
+        public void SearchClick(object sender, RoutedEventArgs e)
+        {
+            Button _myButton = (Button)sender;
+            SearchTerm = _myButton.CommandParameter.ToString();
+            PhotosList.Clear();
+            LoadSearchResultList();
+        }
+
+        public async void GridViewItemClick(object sender, ItemClickEventArgs e)
+        {
+            var selectedItem = e.ClickedItem as Photo;
+            if (selectedItem != null)
+                await NavigationService.NavigateAsync(typeof(Views.DetailsPage),
+                    selectedItem.Id);
+        }
+
         #endregion
 
 
         #region Methods
 
-        public async void LoadPhotos()
-        {
-            await GetPhotosList();
-        }                       
-        
-        private async Task GetPhotosList()
+        public async void LoadSearchResultList()
+        {            
+            if (SearchTerm != "")
+                await GetSearchResultList(SearchTerm);
+            else
+                ShowError(ResourceLoader.GetForCurrentView().GetString("EmptySearchMessage"));            
+        }
+
+        private async Task GetSearchResultList(string text)
         {
             if (PageNumber <= PageCount)
             {
                 PageNumber++;
                 ProgressVisibility = true;
 
-                var photosresult = await _photosDataServices.GetPhotosAsync(PageNumber);
+                var photosresult = await _photosDataServices.GetPhotosSearchResultAsync(PageNumber, text);
                 if (photosresult.Successful)
-                {
-                    if (photosresult.Content.Photo != null && photosresult.Content.Photo.Count > 0)
+                {                    
+                    if (photosresult.Content != null && photosresult.Content.Photo.Count > 0)
                     {
                         PageCount = int.Parse(photosresult.Content.Pages);
                         foreach (var item in photosresult.Content.Photo)
@@ -135,8 +145,11 @@ namespace FlickrApp.ViewModels
                 {
                     ShowError(photosresult.Message);
                 }
-                ProgressVisibility = false;                
-            }            
+
+                ProgressVisibility = false;
+
+                AppSettings.AddSetting(Constants.LastSearchKey, text);
+            }
         }
 
         private async Task<List<string>> GetSearchSuggestionsList(string text)
@@ -158,21 +171,20 @@ namespace FlickrApp.ViewModels
                 ShowError(photosresult.Message);
             }
 
-            ProgressVisibility = false;                       
+            ProgressVisibility = false;            
 
             return suggestions;
-        }        
-        
+        }                
 
         private async void ShowError(string message)
         {
             ContentDialog messageDialog = new ContentDialog()
             {
                 Content = message,
-                PrimaryButtonText = ResourceLoader.GetForCurrentView().GetString("Close")                
+                PrimaryButtonText = ResourceLoader.GetForCurrentView().GetString("Close")
             };
 
-            await messageDialog.ShowAsync();                        
+            await messageDialog.ShowAsync();
         }
 
         #endregion
